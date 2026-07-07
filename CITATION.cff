@@ -1,0 +1,36 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite the associated manuscript below."
+title: "FSIRO: Fuzzy Surprise Interior-point Radiotherapy Optimization"
+abstract: >-
+  A fuzzy fluence-map optimization method for radiotherapy based on the surprise
+  function, solved by a custom primal-dual interior-point solver, comparing
+  triangular and trapezoidal membership functions.
+type: software
+authors:
+  - family-names: Cassimiro
+    given-names: "Nicole C."
+    affiliation: "University of Campinas (Unicamp)"
+  - family-names: Oliveira
+    given-names: "Aurelio R. L."
+    affiliation: "University of Campinas (Unicamp)"
+license: MIT
+year: 2025
+repository-code: "https://github.com/nicolecassimiro/FSIRO"
+keywords:
+  - radiotherapy
+  - fuzzy optimization
+  - surprise function
+  - interior-point method
+  - fluence-map optimization
+preferred-citation:
+  type: article
+  title: >-
+    Fuzzy Radiotherapy Optimization Based on the Surprise Function: A
+    Comparative Study of Triangular and Trapezoidal Memberships
+  authors:
+    - family-names: Cassimiro
+      given-names: "Nicole C."
+    - family-names: Oliveira
+      given-names: "Aurelio R. L."
+  year: 2025
+  notes: "Manuscript under review. This entry will be updated upon acceptance."
