@@ -1,18 +1,36 @@
-function T = evaluate_plan_liver(dose, sizes, Dp)
+function T = evaluate_plan_liver(dose, sizes, Dp, names)
 % EVALUATE_PLAN_LIVER  Clinical (DVH) evaluation of a liver SBRT plan.
 %
-%   T = evaluate_plan_liver(out.dose, out.sizes, out.Dp)
+%   T = evaluate_plan_liver(out.dose, out.sizes, out.Dp, out.names)
 %
-%   Uses METRICAS_DVH as the engine. Structure order follows protocol_liver:
-%     PTV, Liver minus CTV, Spinal Cord, Heart, Stomach, Oesophagus, Duodenum,
-%     Pancreas, Kidney (L), Kidney (R).
+% Robust to variable structure sets: each structure present in the plan is
+% matched to its QUANTEC spec by name, so patients missing an OAR (e.g. no
+% pancreas) or with extra ones (e.g. bowels) are handled automatically. If
+% NAMES is omitted, the standard protocol_liver order is assumed.
 %
-%   QUANTEC limits (conventional fractionation; see criterios_dose_Liver). SBRT
-%   limits differ - the values below are reference and should be audited for the
-%   fractionation scheme. Returns T (struct array), one entry per structure.
+% Uses DVH_METRICS as the engine. QUANTEC limits are conventional-fractionation
+% reference values (SBRT limits differ; audit for the fractionation scheme).
+% Returns T (struct array), one entry per structure.
 
-    names = {'PTV','Liver minus CTV','Spinal Cord','Heart','Stomach', ...
-             'Oesophagus','Duodenum','Pancreas','Kidney (L)','Kidney (R)'};
+    if nargin < 4 || isempty(names)
+        P = protocol_liver();
+        names = [{P.target.pattern}, {P.oars.pattern}];
+    end
+    names = cellfun(@clean_name, names, 'uni', 0);
+
+    % QUANTEC spec map: key = structure name -> {metric, limit, type, label}
+    spec = containers.Map('KeyType','char','ValueType','any');
+    spec('Liver minus CTV') = {'Dmean', 28,  'parallel', 'RILD (primary/HCC)'};
+    spec('Liver minus GTV') = {'Dmean', 28,  'parallel', 'RILD (primary/HCC)'};
+    spec('Spinal Cord')     = {'Dmax',  50,  'serial',   'myelopathy (SBRT ref ~18)'};
+    spec('Heart')           = {'Dmean', 26,  'parallel', 'pericarditis (aim V25<10%)'};
+    spec('Stomach')         = {'Dmin',  45,  'serial',   'D100 whole-stomach'};
+    spec('Oesophagus')      = {'Dmean', 34,  'parallel', 'esophagitis'};
+    spec('Duodenum')        = {'Dmax',  45,  'serial',   'small bowel'};
+    spec('Bowels')          = {'Dmax',  45,  'serial',   'small bowel (V15<120cc)'};
+    spec('Pancreas')        = {'Dmean', NaN, 'parallel', 'no specific QUANTEC'};
+    spec('Kidney (L)')      = {'Dmean', 18,  'parallel', 'renal dysfunction'};
+    spec('Kidney (R)')      = {'Dmean', 18,  'parallel', 'renal dysfunction'};
 
     % slice the dose per structure
     D = cell(1,numel(sizes));  o = 0;
@@ -20,42 +38,33 @@ function T = evaluate_plan_liver(dose, sizes, Dp)
 
     fprintf('=== Liver (SBRT) clinical evaluation  (Dp = %.1f Gy) ===\n', Dp);
 
-    % ---------------- PTV (target) ----------------
+    % ---------------- target (first structure) ----------------
     Mp = dvh_metrics(D{1}, Dp);
     covmin = 0.67 * Mp.Dmax;                 % SBRT: prescribed minimum = 67% of max
     okD98  = Mp.D98 >= covmin;
-    fprintf(['PTV   : D98=%.2f (>=%.2f? %s)  D2=%.2f  D50=%.2f  Dmean=%.2f  ' ...
-             'Dmax=%.2f  HI=%.3f\n'], Mp.D98, covmin, yn(okD98), Mp.D2, Mp.D50, ...
-             Mp.Dmean, Mp.Dmax, Mp.HI);
-    T(1) = res('PTV','D98',Mp.D98,covmin,okD98);
+    fprintf(['%-16s: D98=%.2f (>=%.2f? %s)  D2=%.2f  D50=%.2f  Dmean=%.2f  ' ...
+             'Dmax=%.2f  HI=%.3f\n'], names{1}, Mp.D98, covmin, yn(okD98), ...
+             Mp.D2, Mp.D50, Mp.Dmean, Mp.Dmax, Mp.HI);
+    T(1) = res(names{1}, 'D98', Mp.D98, covmin, okD98);
 
-    % ---------------- OARs ----------------
-    % spec: {index, metric, limit, type, label}
-    spec = { ...
-        2, 'Dmean', 28,  'parallel', 'RILD (primary/HCC)'; ...
-        3, 'Dmax',  50,  'serial',   'myelopathy (SBRT ref ~18)'; ...
-        4, 'Dmean', 26,  'parallel', 'pericarditis (aim V25<10%)'; ...
-        5, 'Dmin',  45,  'serial',   'D100 whole-stomach'; ...
-        6, 'Dmean', 34,  'parallel', 'esophagitis'; ...
-        7, 'Dmax',  45,  'serial',   'small bowel'; ...
-        8, 'Dmean', NaN, 'parallel', 'no specific QUANTEC'; ...
-        9, 'Dmean', 18,  'parallel', 'renal dysfunction'; ...
-       10, 'Dmean', 18,  'parallel', 'renal dysfunction' };
-
-    for k = 1:size(spec,1)
-        idx = spec{k,1};  fld = spec{k,2};  lim = spec{k,3};
-        typ = spec{k,4};  lab = spec{k,5};
-        M   = dvh_metrics(D{idx});
+    % ---------------- OARs (match each present structure by name) ----------------
+    for i = 2:numel(sizes)
+        nm = names{i};  M = dvh_metrics(D{i});
+        if isKey(spec, nm)
+            s = spec(nm);  fld = s{1};  lim = s{2};  typ = s{3};  lab = s{4};
+        else
+            fld = 'Dmean';  lim = NaN;  typ = 'parallel';  lab = 'no spec';
+        end
         val = M.(fld);
         if isnan(lim)
-            fprintf('%-15s: %s=%.2f Gy  [%s]  (%s)\n', names{idx}, fld, val, typ, lab);
+            fprintf('%-16s: %s=%.2f Gy  [%s]  (%s)\n', nm, fld, val, typ, lab);
             ok = true;
         else
             ok = val <= lim;
-            fprintf('%-15s: %s=%.2f Gy (<=%d? %s)  [%s]  (%s)\n', ...
-                    names{idx}, fld, val, lim, yn(ok), typ, lab);
+            fprintf('%-16s: %s=%.2f Gy (<=%g? %s)  [%s]  (%s)\n', ...
+                    nm, fld, val, lim, yn(ok), typ, lab);
         end
-        T(end+1) = res(names{idx}, fld, val, lim, ok); %#ok<AGROW>
+        T(end+1) = res(nm, fld, val, lim, ok); %#ok<AGROW>
     end
 end
 
@@ -66,4 +75,10 @@ end
 function r = res(name, metric, value, limit, passed)
     r.name = name;  r.metric = metric;  r.value = value;
     r.limit = limit;  r.passed = passed;
+end
+
+function s = clean_name(pat)
+    s = regexprep(pat, '[\^\$]', '');
+    s = regexprep(s, '\((CTV\|GTV)\)', 'CTV');   % '(CTV|GTV)' -> 'CTV' for display
+    s = strrep(strrep(s, '\(', '('), '\)', ')');
 end

@@ -44,16 +44,25 @@ function out = FSIRO(matfile, shape, protocol, verbose)
     mu_min   = protocol.mu_min;
 
     % ---- load and locate structures by name (target first, then OARs) ----
+    % OARs absent in a given patient (not contoured) are skipped with a warning,
+    % so each plan uses the structures actually present.
     Sm = load(matfile);  data = Sm.data;  problem = Sm.problem;
     At = full_matrix(data, protocol.target.pattern, protocol.target.exclude);
-    nOAR = numel(protocol.oars);
-    Aoar = cell(1,nOAR);  szoar = zeros(1,nOAR);  names = cell(1,nOAR+1);
-    names{1} = protocol.target.pattern;
-    for j = 1:nOAR
-        Aoar{j} = full_matrix(data, protocol.oars(j).pattern, '');
-        szoar(j) = size(Aoar{j},1);
-        names{j+1} = protocol.oars(j).pattern;
+    names = {protocol.target.pattern};
+    Aoar = {};  szoar = [];  keep = false(1, numel(protocol.oars));
+    for j = 1:numel(protocol.oars)
+        Aj = full_matrix(data, protocol.oars(j).pattern, '', false);
+        if isempty(Aj)
+            warning('FSIRO:missingOAR', 'OAR not found, skipping: %s', protocol.oars(j).pattern);
+            continue;
+        end
+        keep(j) = true;
+        Aoar{end+1} = Aj;              %#ok<AGROW>
+        szoar(end+1) = size(Aj,1);     %#ok<AGROW>
+        names{end+1} = protocol.oars(j).pattern; %#ok<AGROW>
     end
+    protocol.oars = protocol.oars(keep);   % effective OAR set (present only)
+    nOAR = numel(protocol.oars);
     A = [At; vertcat(Aoar{:})];  A = sparse(A);  A2 = A.^2;
     [TP, N] = size(A);
     szt = size(At,1);  sizes = [szt szoar];
@@ -188,14 +197,18 @@ end
 
 
 % ===================== protocol-driven construction =====================
-function A = full_matrix(data, pattern, exclude)
+function A = full_matrix(data, pattern, exclude, required)
 % Dose matrix of the structure matching PATTERN (excluding '(mean)' and EXCLUDE).
+% If required is false and no structure matches, returns [] instead of erroring.
+    if nargin < 4, required = true; end
     nm = {data.matrix.Name};
     hit = ~cellfun('isempty', regexpi(nm, pattern, 'once'));
     if ~isempty(exclude), hit = hit & cellfun('isempty', regexpi(nm, exclude, 'once')); end
     hit = hit & cellfun('isempty', regexpi(nm, '\(mean\)', 'once'));
     idx = find(hit, 1);
-    if isempty(idx), error('Structure not found: %s', pattern); end
+    if isempty(idx)
+        if required, error('Structure not found: %s', pattern); else, A = []; return; end
+    end
     A = sparse(double(data.matrix(idx).A));
 end
 
