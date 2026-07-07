@@ -53,7 +53,9 @@ function out = FSIRO(matfile, shape, protocol, verbose)
     for j = 1:numel(protocol.oars)
         Aj = full_matrix(data, protocol.oars(j).pattern, '', false);
         if isempty(Aj)
-            warning('FSIRO:missingOAR', 'OAR not found, skipping: %s', protocol.oars(j).pattern);
+            if verbose
+                fprintf('   (OAR not contoured, skipped: %s)\n', protocol.oars(j).pattern);
+            end
             continue;
         end
         keep(j) = true;
